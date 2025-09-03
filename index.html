@@ -1,79 +1,100 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>🔒 Offline PDF Locker</title>
-  <style>
-    body { font-family: Arial, sans-serif; background:#0b1220; color:#eaf1ff; display:flex; justify-content:center; align-items:center; height:100vh; margin:0;}
-    .container { background:#101a2e; padding:30px; border-radius:15px; max-width:450px; width:100%; text-align:center;}
-    input, button { padding:10px; margin:8px 0; width:100%; border-radius:8px; border:none; }
-    button { background:#4da3ff; color:white; font-weight:bold; cursor:pointer; }
-    #fileInfo { font-size:12px; color:#93a4bf; margin-top:6px;}
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>🔒 Offline PDF Locker</title>
+<style>
+body { font-family: Arial, sans-serif; background:#0b1220; color:#eaf1ff; display:flex; justify-content:center; align-items:center; height:100vh; margin:0;}
+.container { background:#101a2e; padding:30px; border-radius:15px; max-width:450px; width:100%; text-align:center;}
+input, button { padding:10px; margin:8px 0; width:100%; border-radius:8px; border:none; }
+button { background:#4da3ff; color:white; font-weight:bold; cursor:pointer; }
+#fileInfo { font-size:12px; color:#93a4bf; margin-top:6px;}
+#log { font-size:12px; color:#a5c7ff; margin-top:8px; text-align:left; white-space:pre-wrap;}
+</style>
 </head>
 <body>
-  <div class="container">
-    <h1>🔒 Offline PDF Locker</h1>
-    <p>Select PDF & set password to lock (100% offline)</p>
-    
-    <input type="file" id="picker" accept="application/pdf" />
-    <div id="fileInfo">No file selected</div>
-    
-    <input type="password" id="userPwd" placeholder="User Password" />
-    <input type="password" id="ownerPwd" placeholder="Owner Password (optional)" />
-    
-    <button id="lockBtn">🔐 Lock PDF</button>
-    <div id="log" style="margin-top:10px;font-size:12px;color:#a5c7ff;"></div>
-  </div>
+<div class="container">
+  <h1>🔒 Offline PDF Locker</h1>
+  <p>Select PDF & set password to lock (100% offline)</p>
 
-  <!-- QPDF loader (needs qpdf.js & qpdf.wasm in same folder) -->
-  <script src="qpdf.js"></script>
-  <script>
-    const filePicker = document.getElementById('picker');
-    const fileInfo = document.getElementById('fileInfo');
-    const lockBtn = document.getElementById('lockBtn');
-    const logEl = document.getElementById('log');
-    let selectedFile = null;
+  <input type="file" id="picker" accept="application/pdf" />
+  <div id="fileInfo">No file selected</div>
 
-    filePicker.addEventListener('change', (e) => {
-      selectedFile = e.target.files[0];
-      if(selectedFile && selectedFile.type === 'application/pdf'){
-        fileInfo.textContent = `${selectedFile.name} • ${(selectedFile.size/1024/1024).toFixed(2)} MB`;
-      } else {
-        selectedFile = null;
-        fileInfo.textContent = 'Please select a PDF file';
-      }
-    });
+  <input type="password" id="userPwd" placeholder="User Password" />
+  <input type="password" id="ownerPwd" placeholder="Owner Password (optional)" />
 
-    lockBtn.addEventListener('click', async ()=>{
-      if(!selectedFile){ alert('Select a PDF first'); return;}
-      const userPwd = document.getElementById('userPwd').value.trim();
-      const ownerPwd = document.getElementById('ownerPwd').value.trim() || userPwd || 'owner';
-      if(!userPwd){ alert('User password required'); return;}
-      logEl.textContent = 'Processing...';
+  <button id="lockBtn" disabled>🔐 Lock PDF</button>
+  <div id="log"></div>
+</div>
 
-      const arrayBuffer = await selectedFile.arrayBuffer();
-      const inBytes = new Uint8Array(arrayBuffer);
-      try {
-        QPDF.FS.writeFile('/in.pdf', inBytes);
-        QPDF.callMain(['--encrypt', userPwd, ownerPwd, '256', '--', '/in.pdf', '/out.pdf']);
-        const outBytes = QPDF.FS.readFile('/out.pdf');
-        const blob = new Blob([outBytes], {type:'application/pdf'});
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = selectedFile.name.replace(/\.pdf$/i,'_locked.pdf');
-        a.click();
-        URL.revokeObjectURL(a.href);
-        logEl.textContent = '✅ PDF Locked Successfully';
-      } catch(err) {
-        console.error(err);
-        logEl.textContent = '❌ Error: ' + (err.message || err);
-      } finally {
-        try{ QPDF.FS.unlink('/in.pdf'); }catch{}
-        try{ QPDF.FS.unlink('/out.pdf'); }catch{}
-      }
-    });
-  </script>
+<!-- QPDF loader (needs qpdf.js & qpdf.wasm in same folder) -->
+<script src="qpdf.js"></script>
+<script>
+let QPDF = null;
+const logEl = document.getElementById('log');
+const lockBtn = document.getElementById('lockBtn');
+const filePicker = document.getElementById('picker');
+const fileInfo = document.getElementById('fileInfo');
+let selectedFile = null;
+
+// Initialize QPDF
+createQPDFModule({
+  locateFile: (path) => path, // expects qpdf.wasm in same folder
+  onRuntimeInitialized: function() {
+    QPDF = this;
+    logEl.textContent = "✅ QPDF engine ready.";
+    lockBtn.disabled = false;
+  },
+  print: (msg) => logEl.textContent += msg + "\n"
+});
+
+// File selection
+filePicker.addEventListener('change', (e) => {
+  selectedFile = e.target.files[0];
+  if(selectedFile && selectedFile.type === 'application/pdf'){
+    fileInfo.textContent = `${selectedFile.name} • ${(selectedFile.size/1024/1024).toFixed(2)} MB`;
+  } else {
+    selectedFile = null;
+    fileInfo.textContent = 'Please select a PDF file';
+  }
+});
+
+// Lock PDF
+lockBtn.addEventListener('click', async () => {
+  if(!selectedFile) { alert('Select a PDF first'); return; }
+  if(!QPDF) { alert('QPDF not ready'); return; }
+
+  const userPwd = document.getElementById('userPwd').value.trim();
+  const ownerPwd = document.getElementById('ownerPwd').value.trim() || userPwd || 'owner';
+  if(!userPwd){ alert('User password required'); return; }
+
+  logEl.textContent = "🔒 Processing PDF...\n";
+
+  try {
+    const arrayBuffer = await selectedFile.arrayBuffer();
+    const inBytes = new Uint8Array(arrayBuffer);
+
+    QPDF.FS.writeFile('/in.pdf', inBytes);
+    QPDF.callMain(['--encrypt', userPwd, ownerPwd, '256', '--', '/in.pdf', '/out.pdf']);
+    const outBytes = QPDF.FS.readFile('/out.pdf');
+
+    const blob = new Blob([outBytes], {type:'application/pdf'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = selectedFile.name.replace(/\.pdf$/i,'_locked.pdf');
+    a.click();
+    URL.revokeObjectURL(a.href);
+
+    logEl.textContent += "✅ PDF Locked Successfully";
+  } catch(err) {
+    console.error(err);
+    logEl.textContent += "\n❌ Error: " + (err.message || err);
+  } finally {
+    try{ QPDF.FS.unlink('/in.pdf'); }catch{}
+    try{ QPDF.FS.unlink('/out.pdf'); }catch{}
+  }
+});
+</script>
 </body>
 </html>
